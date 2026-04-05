@@ -1,0 +1,7 @@
+.env*
+venv/
+pyvenv.cfg
+Scripts/
+Lib/
+Include/
+*.log
