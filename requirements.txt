@@ -1,0 +1,6 @@
+certifi==2026.2.25
+charset-normalizer==3.4.7
+idna==3.11
+requests==2.33.1
+urllib3==2.6.3
+zoom @ git+ssh://github.com/jordan-sansing/zoom.py.git@2f714b44b4445907a06eab2f68a2c4d135bea564
