@@ -58,7 +58,7 @@ def find_existing_provision_template(m: str, z: zoom.zoom_client) -> str:
         next_page_token = res["next_page_token"]
         for template in res["provision_templates"]:
             if m in template["description"]:
-                logger.debug(f"A provisioning template with the mac {m} was found with the name {template["name"]}.")
+                logger.debug(f"A provisioning template with the mac {m} was found with the name {template['name']}.")
                 logger.debug("We will skip creating a provisioning template and modify the existing one.")
                 template_id = template["id"]
                 return template_id
