@@ -21,6 +21,7 @@ import logging
 import sys
 import re
 import datetime
+import pathlib
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename="zoomsync.log", filemode="a+", level=logging.DEBUG)
@@ -98,13 +99,66 @@ def get_device_from_zoom(m: str, z: zoom.zoom_client) -> dict:
 
     return device_details
 
+def diff_ini_files(m: str, t: str) -> str:
+    """
+        when a port is moved on the ata (from index X to index Y) to INI file will
+        reflect this device on both ports because the device was never deleted, just moved.
+
+        this function will attept to allow users to `move` a device without first deleting it and then
+        recreating it on the desired port, by diffing an old version of the INI file with the new one.
+    """
+    logger.debug("Attempting to see if this update will cause port duplication issues.")
+
+    found = False
+
+    for file in pathlib.Path("configs/").iterdir():
+
+        if file.name == f"{m}.old":
+            logger.debug(f"File {m}.old was found, using this to compare the new update with the last update.")
+            found = True
+
+            with open(file=f"configs/{m}.old", mode="r") as f:
+
+                content = f.read()
+
+                reg_ids = re.findall(pattern=r"\d{20}", string=t, flags=re.MULTILINE)
+
+                seen = set()
+                duplicates = [x for x in reg_ids if x in seen or seen.add(x)]
+
+                # device has not moved ports, the config will be updated as normal
+                if not duplicates: 
+                    logger.debug("This update likely wasn't a port update. There were no duplicate reg id's in the INI.")
+                    return t
+
+                logger.debug(f"This update was likely a port update, found {len(duplicates)} duplicate reg id's.")
+                for d in duplicates:
+                    logger.debug(f"Reg ID is a duplicate: {d}")
+
+                    pattern = r"(.*" + d + ".*)"
+
+                    old_line = re.search(pattern=pattern, string=content, flags=re.MULTILINE)
+                    
+                    t = t.replace(old_line.group(0), "")
+                    logger.debug(f"Deleted the old line: {old_line}.")
+                return t
+    
+    if not found:
+        logger.warning("This script has been run for the first time. Beware of sync issues!")
+
+        with open(file=f"configs/{m}.old", mode="w+") as old:
+            old.write(t)
+            return t
+
+
+
 
 for line in sys.stdin:
 
     """
     stdin will remain open until terminated. rsyslog will terminate this loop after 30 seconds of no messages
     """
-
+    
     logger.info("  ")
 
     msg = line.strip()
@@ -133,9 +187,12 @@ for line in sys.stdin:
     mac_address = product_details['macAddress'].upper()
 
     logger.debug(f"Extracted mac address: {mac_address}")
- 
+
     trunk_groups = audiocodes.extract_ini_trunk_groups(ini=audiocodes.fetch_ini())
-    
+        
+    # If the phone port was updated, delete the old port otherwise there will be duplicates   
+    trunk_groups = diff_ini_files(m=mac_address, t=trunk_groups)
+
     # Check to see if this provisioning template exists
     template_id = find_existing_provision_template(m=mac_address, z=zoom_client)
 
@@ -148,6 +205,9 @@ for line in sys.stdin:
         "content" : trunk_groups
     }
 
+    with open(file=f"configs/{mac_address}.old", mode="w+", newline="") as old:
+        old.write(trunk_groups)
+        
     # Template doesn't exist
     if not template_id:
         
@@ -162,7 +222,7 @@ for line in sys.stdin:
             print("Critical error, see logs.")
             sys.exit(1)
 
-        
+
     # Template exists, update it
     else:
 
@@ -193,5 +253,7 @@ for line in sys.stdin:
     
     else:
         logger.debug("This device has the correct provision template bound to it.")
+
+    
 
 logger.info("Completed with no errors.")
