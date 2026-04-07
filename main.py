@@ -18,25 +18,38 @@ rsyslog will execute this script whenever a log message matches one of two regex
 import Audiocodes
 import zoom
 import logging
+from logging.handlers import RotatingFileHandler
 import sys
 import re
 import datetime
 import pathlib
 import os
 
+
 path = "."
+if not pathlib.Path(os.path.join(path, "configs")).exists():
+    logging.debug("Directory config/ didn't exist, creating now.")
+    os.mkdir("configs/")
+
+if not pathlib.Path(os.path.join(path, "logs")).exists():
+    logging.debug("Directory logs/ didn't exist, creating now.")
+    os.mkdir("logs/")
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename=os.path.join(path, "zoomsync.log"), filemode="a+", level=logging.DEBUG)
+logging.basicConfig(
+    handlers=[ RotatingFileHandler(os.path.join(path, "logs/zoomsync.log"), maxBytes=100000, backupCount=10) ],
+    filemode="a+", 
+    level=logging.DEBUG,
+    format="[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
+    datefmt='%Y-%m-%dT%H:%M:%S'
+)
 
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
 
+
 logger.info("PROG INIT")
 
-if not pathlib.Path(os.path.join(path, "configs")).exists():
-    logging.debug("Directory /config/ didn't exist, creating now.")
-    os.mkdir("configs/")
 
 zoom_env = os.path.join(path, ".env_zoom")
 audiocodes_env = os.path.join(path, ".env_audiocodes")
@@ -148,7 +161,7 @@ def diff_ini_files(m: str, t: str) -> str:
                     old_line = re.search(pattern=pattern, string=content, flags=re.MULTILINE)
                     
                     t = t.replace(old_line.group(0), "")
-                    logger.debug(f"Deleted the old line: {old_line}.")
+                    logger.debug(f"Deleted the old line: {old_line.group(0)}.")
                 return t
     
     if not found:
