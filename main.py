@@ -22,17 +22,24 @@ import sys
 import re
 import datetime
 import pathlib
+import os
+
+path = "."
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename="zoomsync.log", filemode="a+", level=logging.DEBUG)
+logging.basicConfig(filename=os.path.join(path, "zoomsync.log"), filemode="a+", level=logging.DEBUG)
 
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
 
 logger.info("PROG INIT")
 
-zoom_env = r".env_zoom"
-audiocodes_env = ".env_audiocodes"
+if not pathlib.Path(os.path.join(path, "configs")).exists():
+    logging.debug("Directory /config/ didn't exist, creating now.")
+    os.mkdir("configs/")
+
+zoom_env = os.path.join(path, ".env_zoom")
+audiocodes_env = os.path.join(path, ".env_audiocodes")
 
 zoom_client = zoom.zoom_client(
     warn=True,
@@ -99,6 +106,7 @@ def get_device_from_zoom(m: str, z: zoom.zoom_client) -> dict:
 
     return device_details
 
+
 def diff_ini_files(m: str, t: str) -> str:
     """
         when a port is moved on the ata (from index X to index Y) to INI file will
@@ -111,13 +119,13 @@ def diff_ini_files(m: str, t: str) -> str:
 
     found = False
 
-    for file in pathlib.Path("configs/").iterdir():
+    for file in pathlib.Path(os.path.join(path, "configs")).iterdir():
 
         if file.name == f"{m}.old":
             logger.debug(f"File {m}.old was found, using this to compare the new update with the last update.")
             found = True
 
-            with open(file=f"configs/{m}.old", mode="r") as f:
+            with open(file=os.path.join(path, f"configs/{m}.old"), mode="r") as f:
 
                 content = f.read()
 
@@ -146,9 +154,8 @@ def diff_ini_files(m: str, t: str) -> str:
     if not found:
         logger.warning("This script has been run for the first time. Beware of sync issues!")
 
-        with open(file=f"configs/{m}.old", mode="w+") as old:
-            old.write(t)
-            return t
+        return t
+       
 
 
 
@@ -205,7 +212,7 @@ for line in sys.stdin:
         "content" : trunk_groups
     }
 
-    with open(file=f"configs/{mac_address}.old", mode="w+", newline="") as old:
+    with open(file=os.path.join(path, f"configs/{mac_address}.old"), mode="w+", newline="") as old:
         old.write(trunk_groups)
         
     # Template doesn't exist
