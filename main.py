@@ -24,10 +24,9 @@ import re
 import datetime
 import pathlib
 import os
-import json
 
 
-path = r"c:\Users\sansi002\projects\ZoomSync\ZoomSync"
+path = r""
 
 if not pathlib.Path(os.path.join(path, "configs")).exists():
     logging.debug("Directory config/ didn't exist, creating now.")
@@ -74,7 +73,7 @@ audiocodes = Audiocodes.API(
 
 def find_existing_provision_template(m: str, z: zoom.zoom_client) -> str:
 
-    logger.debug("Attempting to see if this provisioning template exists.")
+    logger.info("Attempting to see if this provisioning template exists.")
 
     next_page_token = ""
     template_id = ""
@@ -85,19 +84,19 @@ def find_existing_provision_template(m: str, z: zoom.zoom_client) -> str:
         next_page_token = res["next_page_token"]
         for template in res["provision_templates"]:
             if m in template["description"]:
-                logger.debug(f"A provisioning template with the mac {m} was found with the name {template['name']}.")
-                logger.debug("We will skip creating a provisioning template and modify the existing one.")
+                logger.info(f"A provisioning template with the mac {m} was found with the name {template['name']}.")
+                logger.info("We will skip creating a provisioning template and modify the existing one.")
                 template_id = template["id"]
                 return template_id
         
-        logger.debug(f"There was no existing provisioning template with the mac {m} in the description, will create one.")
+        logger.info(f"There was no existing provisioning template with the mac {m} in the description, will create one.")
         return template_id
 
 
 
 def get_device_from_zoom(m: str, z: zoom.zoom_client) -> dict:
 
-    logger.debug("Attempting to get device details for this MP1288 from Zoom.")
+    logger.info("Attempting to get device details for this MP1288 from Zoom.")
 
     device_details = {
         "name" : None,
@@ -108,25 +107,23 @@ def get_device_from_zoom(m: str, z: zoom.zoom_client) -> dict:
     device = z.list_devices(type="assigned", keyword=m)
 
     if device["total_records"] == 1:
-        logger.debug("Successfully found this device in Zoom.")
+        logger.info("Successfully found this device in Zoom.")
         try:
             device_details["name"] = device["devices"][0]["display_name"]
             device_details["id"] = device["devices"][0]["id"]
             device_details["template_id"] = device["devices"][0]["provision_template_id"]
         except Exception as e:
             logger.critical(f"Could not extract Zoom device details. Reason: {e}")
-            print("Critical error, see logs.")
-            sys.exit(1)
+            return { }
     else:
         logger.critical(f"Unable to locate this device in Zoom.")
         logger.critical(f"Total records: {device['total_records']}.")
-        print(f"Could not find {m} in Zoom. Check logs for details.")
-        sys.exit(1)            
+        return { }           
 
     return device_details
 
        
-def detect_port_move(m: str, t: str, z: zoom.zoom_client) -> str:
+def detect_and_correct_port_move(t: str, z: zoom.zoom_client, d: dict) -> str:
     """
         when a port is moved on the ata (from index X to index Y) to INI file will
         reflect this device on both ports because the device was never deleted. The provision template will 
@@ -137,35 +134,19 @@ def detect_port_move(m: str, t: str, z: zoom.zoom_client) -> str:
         the INI file from the device and delete the incongruent line.
     """
 
-    logger.debug("Attempting to get the audiocodes device ports and positions.")
+    logger.info("Attempting to get the audiocodes device ports and positions.")
 
-    logger.debug("Fetching the audiocodes device ID from Zoom.")
+    logger.info("Attempting to get the device line keys from Zoom.")
 
-    # Get audiocodes device ID
-    res = z.list_devices(keyword=m)
-
-    if res["total_records"] != 1:
-        logger.error("Failed to get the device ID from Zoom. Sync issues likely.")
-        return t
-    
-    try:
-        device_id = res["devices"][0]["id"]
-    except:
-        logger.error("Failed to extract the device ID from the response, but successfully got a response. Sync issues likely.")
-        return t
-    
-    logger.debug("Successfully got the device ID.")
-
-    logger.debug("Attempting to get the device line keys from Zoom.")
-
-    zoom_positions = z.get_device_line_keys(device_id=device_id)
+    zoom_positions = z.get_device_line_keys(device_id=d)
 
     if not zoom_positions:
-        logger.error("Failed to get the ports and positions from the audiocodes. See logs. Sync issues likely. ")
+        logger.error("Failed to get the ports and positions from the audiocodes. See logs. Sync issues likely.")
+        sys.stderr.write("Failed to get the ports and positions from the audiocodes. See logs. Sync issues likely.")
+        sys.stderr.flush()
         return t
     
-
-    logger.debug("Successfully fetched the device ports and positions")
+    logger.info("Successfully fetched the device ports and positions")
 
     zoom_positions = [ x["index"] for x in zoom_positions["positions"] ]
 
@@ -174,6 +155,8 @@ def detect_port_move(m: str, t: str, z: zoom.zoom_client) -> str:
 
     if not ini_positions:
         logger.error("Failed to parse out the port indicies from the INI file. Sync issues likely.")
+        sys.stderr.write("Failed to parse out the port indicies from the INI file. Sync issues likely.")
+        sys.stderr.flush()
         return t
     
     # Return from left what is not found in right
@@ -193,10 +176,12 @@ def detect_port_move(m: str, t: str, z: zoom.zoom_client) -> str:
             if f: return f
 
             logger.error("Failed to diff the Zoom Positions and the Audiocodes INI. Sync issues likely.")
+            sys.stderr.write("Failed to diff the Zoom Positions and the Audiocodes INI. Sync issues likely.")
+            sys.stderr.flush()
             return t
     
-    logger.debug("There were no port differences between the Zoom Positions and the Audiocodes INI.")
-    logger.debug("This was likely not a port move.")
+    logger.info("There were no port differences between the Zoom Positions and the Audiocodes INI.")
+    logger.info("This was likely not a port move.")
 
     return t
 
@@ -206,6 +191,8 @@ for line in sys.stdin:
     """
     stdin will remain open until terminated. rsyslog will terminate this loop after 30 seconds of no messages
     """
+    sys.stdout.write("OK")
+    sys.stdout.flush()
     
     logger.info("  ")
 
@@ -218,10 +205,12 @@ for line in sys.stdin:
 
     if not hostname:
         logger.error("Failed to extract the mac hostname from the rsyslog message.")
+        sys.stderr.write("Failed to extract the mac hostname from the rsyslog message.")
+        sys.stderr.flush()
         continue
     hostname = hostname.group(0).strip()
 
-    logger.debug(f"Extracted hostname: {hostname}")
+    logger.info(f"Extracted hostname: {hostname}")
     # # # 
 
     audiocodes.set_ip(hostname)
@@ -229,23 +218,25 @@ for line in sys.stdin:
 
     if not audiocodes.test_login():
         logger.error("Failed to log into the audiocodes with the FQND provided by rsyslog")
+        sys.stderr.write()
         continue
     
     product_details = audiocodes.get_product_details()
 
     mac_address = product_details['macAddress'].upper()
 
-    logger.debug(f"Extracted mac address: {mac_address}")
+    logger.info(f"Extracted mac address: {mac_address}")
+
+    device_details = get_device_from_zoom(m=mac_address, z=zoom_client)
+
+    if not device_details: continue
 
     trunk_groups = audiocodes.extract_ini_trunk_groups(ini=audiocodes.fetch_ini())
         
-    trunk_groups = detect_port_move(m=mac_address, t=trunk_groups, z=zoom_client)
+    trunk_groups = detect_and_correct_port_move(t=trunk_groups, z=zoom_client, d=device_details["id"])
 
     # Check to see if this provisioning template exists
     template_id = find_existing_provision_template(m=mac_address, z=zoom_client)
-
-    # Check if this MP1288 can be found in Zoom
-    device_details = get_device_from_zoom(m=mac_address, z=zoom_client)
 
     body = {
         "name" : f"MP1288 Provision Template - {device_details['name']}",
@@ -256,35 +247,33 @@ for line in sys.stdin:
     # Template doesn't exist
     if not template_id:
         
-        logger.debug("Attempting to create a provision template in Zoom.")
+        logger.info("Attempting to create a provision template in Zoom.")
 
         res = zoom_client.add_provision_template(body=body)
         try:
-            logger.debug("Successfully created a provision template.")
+            logger.info("Successfully created a provision template.")
             template_id = res["id"]
         except Exception as e:
             logger.critical(f"Failed to get the provosion template ID: {e}")
-            print("Critical error, see logs.")
-            sys.exit(1)
+            continue
 
 
     # Template exists, update it
     else:
 
-        logger.debug("Attempting to update a provision template in Zoom.")
+        logger.info("Attempting to update a provision template in Zoom.")
 
         res = zoom_client.update_provision_template(template_id=template_id, body=body)
         try:
-            logger.debug("Successfully updated a provision template.")
+            logger.info("Successfully updated a provision template.")
         except Exception as e:
             logger.critical("Failed to get the provision template ID.")
-            print("Critical error, see logs.")
-            sys.exit(1)
+            continue
     
     # Is the tempate bound to the device?
     if device_details["template_id"] != template_id:
 
-        logger.debug(f"The Audiocodes doesn't appear to have a provision template assigned to it. Assigning it {template_id}.")
+        logger.info(f"The Audiocodes doesn't appear to have a provision template assigned to it. Assigning it {template_id}.")
 
         body = {"provision_template_id" : template_id}
 
@@ -294,10 +283,10 @@ for line in sys.stdin:
             print("Critical error, see logs.")
             sys.exit(1)
         
-        logger.debug("Successfully bound this template ID to the device.")
+        logger.info("Successfully bound this template ID to the device.")
     
     else:
-        logger.debug("This device has the correct provision template bound to it.")
+        logger.info("This device has the correct provision template bound to it.")
 
     
 
