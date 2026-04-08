@@ -16,7 +16,7 @@ class API:
     header = "FORMAT Index = TrunkGroupNum, FirstTrunkId, FirstBChannel, LastBChannel, FirstPhoneNumber, ProfileName, LastTrunkId, Module;"
     def read_env(self, keyfile: pathlib.Path) -> dict:
 
-        logger.debug(f"Attempting to read audiocodes credentails file: {keyfile}")
+        logger.info(f"Attempting to read audiocodes credentails file: {keyfile}")
 
         creds = { }
 
@@ -28,22 +28,26 @@ class API:
                     if s[0].lower() == 'password': creds['password'] = s[1].strip(); continue
         except FileNotFoundError as e:
             logger.critical(f"Could not find the provided creds file: {e}")
+            sys.stderr.write(f"Could not find the provided creds file: {e}")
+            sys.stderr.flush()
             sys.exit(1)  
         except Exception as e:
             logger.critical(f"Unexpcted error when reading creds file: {e}")
+            sys.stderr.write(f"Unexpcted error when reading creds file: {e}")
+            sys.stderr.flush()
             sys.exit(1)  
 
         if not creds:
             logger.critical("Creds were null after reading file.")
             sys.exit(1)  
         
-        logger.debug("Credentials read successfully.")
+        logger.info("Credentials read successfully.")
         return creds
     
     
     def test_login(self) -> bool:
 
-        logger.debug(f"Attempting to test login to {self.ip}")
+        logger.info(f"Attempting to test login to {self.ip}")
 
         try:
             res = requests.get(url=self.base_url, verify=False, auth=(self.creds['username'], self.creds['password']))
@@ -57,28 +61,32 @@ class API:
     
     
     def validate_http(self, res: requests.Response) -> bool:
-        logger.debug("Attempting to validate an HTTP response code.")
+        logger.info("Attempting to validate an HTTP response code.")
 
         match res.status_code:
             case 200:
-                logger.debug(f"HTTP response: {res.status_code} - OK")
+                logger.info(f"HTTP response: {res.status_code} - OK")
                 return True
             case 404:
                 logger.error("HTTP response: {res.status_code} - NOT FOUND")
+                sys.stderr.write("Audiocodes REST -- HTTP response: {res.status_code} - NOT FOUND")
+                sys.stderr.flush()
                 return False
             case _:
                 logger.error(f"HTTP response: {res.status_code} - UNACCOUNTED FOR")
+                sys.stderr.write(f"Audiocodes REST -- HTTP response: {res.status_code} - UNACCOUNTED FOR")
+                sys.stderr.flush()
                 return False
         
 
-    def __init__(self, key_file: pathlib.Path, audiociodes_ip="", verbosity=40) -> None:
+    def __init__(self, key_file: pathlib.Path, audiociodes_ip="", verbosity=logging.ERROR) -> None:
 
-        if verbosity != 40: 
-            try:
-                logger.setLevel(level=verbosity)
-            except Exception as e:
-                logger.warning(f"Tried to set the logger level to {verbosity} but failed. Reverting to default of 40")
-                logger.setLevel(level=logging.ERROR)
+
+        try:
+            logger.setLevel(level=verbosity)
+        except Exception as e:
+            logger.warning(f"Tried to set the logger level to {verbosity} but failed: {e}. Reverting to default of 40")
+            logger.setLevel(level=logging.ERROR)
 
         self.ip         = audiociodes_ip
         self.creds      = self.read_env(key_file)
@@ -90,7 +98,7 @@ class API:
 
     def fetch_ini(self) -> requests.Response.text:
 
-        logger.debug("Attemting to fetch an INI file.")
+        logger.info("Attemting to fetch an INI file.")
 
         url = f"{self.base_url}/files/ini"
 
@@ -99,12 +107,12 @@ class API:
         if not self.validate_http(res):
             sys.exit(1)
 
-        logger.debug("INI file successfully returned.")
+        logger.info("INI file successfully returned.")
         return res.text
     
 
     def extract_ini_trunk_groups(self, ini: str) -> str:
-        logger.debug("Attempting to prepare the TrunkGroup section of the provided INI file.")
+        logger.info("Attempting to prepare the TrunkGroup section of the provided INI file.")
 
         TrunkGroups = ""
 
@@ -114,12 +122,16 @@ class API:
 
             if not TrunkGroups:
                 logger.critical("Failed to extract the TrunkGroup from the INI file.")
+                sys.stderr.write("Failed to extract the TrunkGroup from the INI file.")
+                sys.stderr.flush()
                 sys.exit(1)
         except Exception as e:
             logger.critical(f"Exception thrown: {e}")
+            sys.stderr.write(f"Exception thrown: {e}")
+            sys.stderr.flush()
             sys.exit(1)
 
-        logger.debug("Successfully parsed the INI file for a TrunkGroup section")
+        logger.info("Successfully parsed the INI file for a TrunkGroup section")
 
         final = "[ TrunkGroup ]\n\n" + self.header + "\n" + TrunkGroups + "\n\n" + r"[ \TrunkGroup ]"
   
@@ -127,7 +139,7 @@ class API:
     
     def get_product_details(self) -> requests.Response.json:
 
-        logger.debug("Attempting to fetch the product details.")
+        logger.info("Attempting to fetch the product details.")
 
         url = f"{self.base_url}/status"
 
@@ -135,8 +147,10 @@ class API:
       
         if not self.validate_http(res):
             logger.critical("Product detail method critical failure.")
+            sys.stderr.write("Product detail method critical failure.")
+            sys.stderr.flush()
             sys.exit(1)
         
-        logger.debug("Successfully fetched the product details.")
+        logger.info("Successfully fetched the product details.")
 
         return res.json()
