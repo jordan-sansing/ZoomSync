@@ -12,6 +12,8 @@ rsyslog will execute this script whenever a log message matches one of two regex
         : these messages are sent when a trunk group id is modified
 
     rsyslog will send the log message to this script via stdin. after 30 seconds of no messages, rsyslog will kill this PID.
+
+    the `omprog` module is set to only queue instances that do not reply with an OK to stdout.
 """
 
 
@@ -25,6 +27,8 @@ import datetime
 import pathlib
 import os
 
+sys.stdout.write("OK\n")
+sys.stdout.flush()
 
 path = r""
 
@@ -193,7 +197,7 @@ for line in sys.stdin:
     """
     sys.stdout.write("OK")
     sys.stdout.flush()
-    
+
     logger.info("  ")
 
     msg = line.strip()
