@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 """
+this script is intended to be executed by the rsyslog `omprog` module.
 
 rsyslog will execute this script whenever a log message matches one of two regex filters:
 
@@ -10,8 +11,7 @@ rsyslog will execute this script whenever a log message matches one of two regex
     - A message containing re`/(.*Activity Log: TrunkGroupTable row [0-9]{0,3} \\- 'TrunkGroupId' was changed to '[0-9]{0,2}'.*)/`
         : these messages are sent when a trunk group id is modified
 
-    rsyslog will send the log message to this script via stdin. after 30 seconds of no messages, rsyslog
-    will kill this PID.
+    rsyslog will send the log message to this script via stdin. after 30 seconds of no messages, rsyslog will kill this PID.
 """
 
 
@@ -24,9 +24,11 @@ import re
 import datetime
 import pathlib
 import os
+import json
 
 
-path = "."
+path = r"c:\Users\sansi002\projects\ZoomSync\ZoomSync"
+
 if not pathlib.Path(os.path.join(path, "configs")).exists():
     logging.debug("Directory config/ didn't exist, creating now.")
     os.mkdir("configs/")
@@ -37,11 +39,15 @@ if not pathlib.Path(os.path.join(path, "logs")).exists():
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    handlers=[ RotatingFileHandler(os.path.join(path, "logs/zoomsync.log"), maxBytes=100000, backupCount=10) ],
-    filemode="a+", 
+    handlers=[ RotatingFileHandler(
+        filename=os.path.join(path, "logs/zoomsync.log"), 
+        mode="a+",
+        maxBytes=100000, 
+        backupCount=10) 
+    ],
     level=logging.DEBUG,
     format="[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
-    datefmt='%Y-%m-%dT%H:%M:%S'
+    datefmt=r"%Y-%m-%dT%H:%M:%S"
 )
 
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
@@ -61,8 +67,8 @@ zoom_client = zoom.zoom_client(
 )
 
 audiocodes = Audiocodes.API(
-    verbosity=10,
     key_file=audiocodes_env,
+    verbosity=logging.INFO
 )
 
 
@@ -119,58 +125,80 @@ def get_device_from_zoom(m: str, z: zoom.zoom_client) -> dict:
 
     return device_details
 
-
-def diff_ini_files(m: str, t: str) -> str:
+       
+def detect_port_move(m: str, t: str, z: zoom.zoom_client) -> str:
     """
         when a port is moved on the ata (from index X to index Y) to INI file will
-        reflect this device on both ports because the device was never deleted, just moved.
+        reflect this device on both ports because the device was never deleted. The provision template will 
+        list the old port and the new port and thus keep the INI file out of sync.
 
         this function will attept to allow users to `move` a device without first deleting it and then
-        recreating it on the desired port, by diffing an old version of the INI file with the new one.
+        recreating it on the desired port by comparing the ports ad positions in zoom with
+        the INI file from the device and delete the incongruent line.
     """
-    logger.debug("Attempting to see if this update will cause port duplication issues.")
 
-    found = False
+    logger.debug("Attempting to get the audiocodes device ports and positions.")
 
-    for file in pathlib.Path(os.path.join(path, "configs")).iterdir():
+    logger.debug("Fetching the audiocodes device ID from Zoom.")
 
-        if file.name == f"{m}.old":
-            logger.debug(f"File {m}.old was found, using this to compare the new update with the last update.")
-            found = True
+    # Get audiocodes device ID
+    res = z.list_devices(keyword=m)
 
-            with open(file=os.path.join(path, f"configs/{m}.old"), mode="r") as f:
-
-                content = f.read()
-
-                reg_ids = re.findall(pattern=r"\d{20}", string=t, flags=re.MULTILINE)
-
-                seen = set()
-                duplicates = [x for x in reg_ids if x in seen or seen.add(x)]
-
-                # device has not moved ports, the config will be updated as normal
-                if not duplicates: 
-                    logger.debug("This update likely wasn't a port update. There were no duplicate reg id's in the INI.")
-                    return t
-
-                logger.debug(f"This update was likely a port update, found {len(duplicates)} duplicate reg id's.")
-                for d in duplicates:
-                    logger.debug(f"Reg ID is a duplicate: {d}")
-
-                    pattern = r"(.*" + d + ".*)"
-
-                    old_line = re.search(pattern=pattern, string=content, flags=re.MULTILINE)
-                    
-                    t = t.replace(old_line.group(0), "")
-                    logger.debug(f"Deleted the old line: {old_line.group(0)}.")
-                return t
-    
-    if not found:
-        logger.warning("This script has been run for the first time. Beware of sync issues!")
-
+    if res["total_records"] != 1:
+        logger.error("Failed to get the device ID from Zoom. Sync issues likely.")
         return t
-       
+    
+    try:
+        device_id = res["devices"][0]["id"]
+    except:
+        logger.error("Failed to extract the device ID from the response, but successfully got a response. Sync issues likely.")
+        return t
+    
+    logger.debug("Successfully got the device ID.")
 
+    logger.debug("Attempting to get the device line keys from Zoom.")
 
+    zoom_positions = z.get_device_line_keys(device_id=device_id)
+
+    if not zoom_positions:
+        logger.error("Failed to get the ports and positions from the audiocodes. See logs. Sync issues likely. ")
+        return t
+    
+
+    logger.debug("Successfully fetched the device ports and positions")
+
+    zoom_positions = [ x["index"] for x in zoom_positions["positions"] ]
+
+    # Parse out the index (zero indexed) from the Trunk Groups section of the INI file
+    ini_positions = [ int(x) + 1 for x in re.findall(pattern=r"TrunkGroup\s(\d{0,3})\s.*", string=t, flags=re.MULTILINE) ]
+
+    if not ini_positions:
+        logger.error("Failed to parse out the port indicies from the INI file. Sync issues likely.")
+        return t
+    
+    # Return from left what is not found in right
+    diff = list(set(ini_positions) - set(zoom_positions)) 
+
+    if diff:
+        logger.info(f"Port diff identified. Attempting to remove the stale port from the Provisioning Template")
+
+        if len(diff) != 1: 
+            logger.warning(f"Odd length for a diff between Zoom Positions and Audiocodes INI ({diff}). This should be '1'")
+        for i in diff:
+            logger.info(f"Diff port index in the INI to remove was was identified as {i}")
+            p = fr"TrunkGroup\s{i - 1}\s\=.*"
+            f = re.sub(pattern=p, repl="", string=t, flags=re.MULTILINE)
+            logger.info("Removed port.")
+
+            if f: return f
+
+            logger.error("Failed to diff the Zoom Positions and the Audiocodes INI. Sync issues likely.")
+            return t
+    
+    logger.debug("There were no port differences between the Zoom Positions and the Audiocodes INI.")
+    logger.debug("This was likely not a port move.")
+
+    return t
 
 
 for line in sys.stdin:
@@ -204,14 +232,14 @@ for line in sys.stdin:
         continue
     
     product_details = audiocodes.get_product_details()
+
     mac_address = product_details['macAddress'].upper()
 
     logger.debug(f"Extracted mac address: {mac_address}")
 
     trunk_groups = audiocodes.extract_ini_trunk_groups(ini=audiocodes.fetch_ini())
         
-    # If the phone port was updated, delete the old port otherwise there will be duplicates   
-    trunk_groups = diff_ini_files(m=mac_address, t=trunk_groups)
+    trunk_groups = detect_port_move(m=mac_address, t=trunk_groups, z=zoom_client)
 
     # Check to see if this provisioning template exists
     template_id = find_existing_provision_template(m=mac_address, z=zoom_client)
@@ -225,9 +253,6 @@ for line in sys.stdin:
         "content" : trunk_groups
     }
 
-    with open(file=os.path.join(path, f"configs/{mac_address}.old"), mode="w+", newline="") as old:
-        old.write(trunk_groups)
-        
     # Template doesn't exist
     if not template_id:
         
