@@ -195,8 +195,8 @@ for line in sys.stdin:
     """
     stdin will remain open until terminated. rsyslog will terminate this loop after 30 seconds of no messages
     """
-    sys.stdout.write("OK")
-    sys.stdout.flush()
+    # sys.stdout.write("OK")
+    # sys.stdout.flush()
 
     logger.info("  ")
 
@@ -243,7 +243,7 @@ for line in sys.stdin:
     template_id = find_existing_provision_template(m=mac_address, z=zoom_client)
 
     body = {
-        "name" : f"MP1288 Provision Template - {device_details['name']}",
+        "name" : f"MP1288 Provision Template - {device_details['name'].upper()}",
         "description" : f"This template was generated programmatically on {timestamp}. The MAC in the description is needed for the script: {mac_address}.",
         "content" : trunk_groups
     }
@@ -268,12 +268,14 @@ for line in sys.stdin:
         logger.info("Attempting to update a provision template in Zoom.")
 
         res = zoom_client.update_provision_template(template_id=template_id, body=body)
-        try:
-            logger.info("Successfully updated a provision template.")
-        except Exception as e:
-            logger.critical("Failed to get the provision template ID.")
+
+        if res.status_code != 204:
+            logger.critical("Failed to update the provision template.")
             continue
-    
+
+
+        logger.info("Successfully updated a provision template.")
+
     # Is the tempate bound to the device?
     if device_details["template_id"] != template_id:
 
