@@ -43,6 +43,7 @@ if not pathlib.Path(os.path.join(path, "logs")).exists():
     os.mkdir("logs/")
 
 logger = logging.getLogger(__name__)
+
 logging.basicConfig(
     # handlers=[ RotatingFileHandler(
     #     filename=os.path.join(path, "logs/zoomsync.log"), 
@@ -52,7 +53,9 @@ logging.basicConfig(
     # ],
     level=logging.DEBUG,
     format="[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
-    datefmt=r"%Y-%m-%dT%H:%M:%S"
+    datefmt=r"%Y-%m-%dT%H:%M:%S",
+    filename="logs/zoomsync.log",
+    mode="a+"
 )
 
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
