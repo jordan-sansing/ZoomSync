@@ -32,6 +32,8 @@ sys.stdout.flush()
 
 path = r""
 
+os.umask(0)
+
 if not pathlib.Path(os.path.join(path, "configs")).exists():
     logging.debug("Directory config/ didn't exist, creating now.")
     os.mkdir("configs/")
@@ -42,12 +44,12 @@ if not pathlib.Path(os.path.join(path, "logs")).exists():
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    handlers=[ RotatingFileHandler(
-        filename=os.path.join(path, "logs/zoomsync.log"), 
-        mode="a+",
-        maxBytes=100000, 
-        backupCount=10) 
-    ],
+    # handlers=[ RotatingFileHandler(
+    #     filename=os.path.join(path, "logs/zoomsync.log"), 
+    #     mode="a+",
+    #     maxBytes=100000, 
+    #     backupCount=10) 
+    # ],
     level=logging.DEBUG,
     format="[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
     datefmt=r"%Y-%m-%dT%H:%M:%S"
